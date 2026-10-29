@@ -1,10 +1,15 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
+import OpenAI from "openai"
 import { z } from "zod"
+import { parseEmailDomains } from "@/lib/assistant/email-domains"
 import { assertAdmin } from "@/lib/auth"
+import { HEX_COLOR } from "@/lib/color"
+import { getOpenAI } from "@/lib/openai/client"
 import { isChatModel } from "@/lib/openai/pricing"
 import { MAX_FILE_BYTES, SUPPORTED_TYPES, fileExtension } from "@/lib/rag/extract"
+import { deleteSecret, setSecret } from "@/lib/secrets"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { fail, ok, type ActionResult } from "@/actions/result"
 
@@ -38,6 +43,19 @@ const limitsSchema = z.object({
   monthly_budget_usd: z.coerce.number().min(0).max(10000),
 })
 
+const brandSchema = z.object({
+  brand_color: z.string().regex(HEX_COLOR, "El color principal debe tener el formato #rrggbb."),
+  brand_accent: z.string().regex(HEX_COLOR, "El color de acento debe tener el formato #rrggbb."),
+})
+
+const LOGO_TYPES: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+  "image/svg+xml": "svg",
+}
+const MAX_LOGO_BYTES = 512 * 1024
+
 async function saveSettings(values: Record<string, unknown>) {
   const { error } = await createAdminClient()
     .from("assistant_settings")
@@ -64,6 +82,21 @@ export async function updateLimits(input: z.input<typeof limitsSchema>): Promise
     await assertAdmin()
     const parsed = limitsSchema.safeParse(input)
     if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message }
+
+    // OpenAI retira modelos sin quitarlos de /models: se prueba con una llamada mínima.
+    // Solo se bloquea si el modelo no existe; otros fallos (saldo, red) no impiden guardar.
+    try {
+      await (await getOpenAI()).chat.completions.create({
+        model: parsed.data.chat_model,
+        max_completion_tokens: 1,
+        messages: [{ role: "user", content: "ok" }],
+      })
+    } catch (err) {
+      if (err instanceof OpenAI.APIError && (err.status === 404 || err.code === "model_not_found")) {
+        return { ok: false, error: "OpenAI ya no ofrece este modelo. Elige otro." }
+      }
+    }
+
     await saveSettings(parsed.data)
     return ok(undefined)
   } catch (err) {
@@ -167,5 +200,125 @@ export async function reviewRequest(requestId: string, approve: boolean, granted
     return ok(undefined)
   } catch (err) {
     return fail(err, "No se pudo actualizar la solicitud.")
+  }
+}
+
+export async function updateBrand(input: z.input<typeof brandSchema>): Promise<ActionResult> {
+  try {
+    await assertAdmin()
+    const parsed = brandSchema.safeParse(input)
+    if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message }
+    await saveSettings({ brand_color: parsed.data.brand_color.toLowerCase(), brand_accent: parsed.data.brand_accent.toLowerCase() })
+    return ok(undefined)
+  } catch (err) {
+    return fail(err, "No se pudieron guardar los colores.")
+  }
+}
+
+const BRAND_IMAGES = { logo: "logo_url", icon: "icon_url" } as const
+export type BrandImage = keyof typeof BRAND_IMAGES
+
+/** Elimina del bucket el archivo al que apunta una URL pública (si es del bucket de marca). */
+async function removeBrandFile(url: string | null) {
+  const marker = "/branding/"
+  const i = url?.indexOf(marker) ?? -1
+  if (!url || i < 0) return
+  await createAdminClient().storage.from("branding").remove([decodeURIComponent(url.slice(i + marker.length).split("?")[0])])
+}
+
+async function currentBrandUrl(column: (typeof BRAND_IMAGES)[BrandImage]): Promise<string | null> {
+  const { data } = await createAdminClient().from("assistant_settings").select(column).eq("id", 1).single()
+  return ((data as Record<string, string | null> | null)?.[column] as string | null) ?? null
+}
+
+export async function uploadBrandImage(kind: BrandImage, formData: FormData): Promise<ActionResult<{ url: string }>> {
+  try {
+    await assertAdmin()
+    const column = BRAND_IMAGES[z.enum(["logo", "icon"]).parse(kind)]
+    const file = formData.get("file")
+    if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Selecciona una imagen." }
+    const ext = LOGO_TYPES[file.type]
+    if (!ext) return { ok: false, error: "Formato no soportado. Usa PNG, JPG, WebP o SVG." }
+    if (file.size > MAX_LOGO_BYTES) return { ok: false, error: "La imagen supera el máximo de 512 KB." }
+
+    const db = createAdminClient()
+    const previous = await currentBrandUrl(column)
+
+    // Nombre nuevo en cada subida: evita que el navegador muestre la imagen anterior en caché.
+    const path = `${kind}-${Date.now()}.${ext}`
+    const { error } = await db.storage.from("branding").upload(path, file, { contentType: file.type })
+    if (error) throw error
+    const url = db.storage.from("branding").getPublicUrl(path).data.publicUrl
+
+    await saveSettings({ [column]: url })
+    await removeBrandFile(previous)
+    return ok({ url })
+  } catch (err) {
+    return fail(err, "No se pudo subir la imagen.")
+  }
+}
+
+export async function removeBrandImage(kind: BrandImage): Promise<ActionResult> {
+  try {
+    await assertAdmin()
+    const column = BRAND_IMAGES[z.enum(["logo", "icon"]).parse(kind)]
+    const previous = await currentBrandUrl(column)
+    await saveSettings({ [column]: null })
+    await removeBrandFile(previous)
+    return ok(undefined)
+  } catch (err) {
+    return fail(err, "No se pudo quitar la imagen.")
+  }
+}
+
+/** Dominios de correo autorizados a registrarse. Lista vacía = cualquier correo. */
+export async function updateAllowedDomains(domains: string[]): Promise<ActionResult<{ domains: string[] }>> {
+  try {
+    await assertAdmin()
+    let parsed: string[]
+    try {
+      parsed = parseEmailDomains(z.array(z.string().max(100)).max(20, "Máximo 20 dominios.").parse(domains))
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : "Dominios no válidos." }
+    }
+    await saveSettings({ allowed_email_domains: parsed })
+    return ok({ domains: parsed })
+  } catch (err) {
+    return fail(err, "No se pudieron guardar los dominios.")
+  }
+}
+
+export async function saveOpenAIKey(apiKey: string): Promise<ActionResult> {
+  try {
+    await assertAdmin()
+    const parsed = z.string().trim().min(20, "La clave es demasiado corta.").max(300).startsWith("sk-", "La clave debe empezar por «sk-».").safeParse(apiKey)
+    if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message }
+
+    // Se comprueba contra OpenAI antes de guardarla (esta llamada no tiene costo).
+    try {
+      await new OpenAI({ apiKey: parsed.data, maxRetries: 0, timeout: 15_000 }).models.list()
+    } catch (err) {
+      if (err instanceof OpenAI.AuthenticationError) return { ok: false, error: "OpenAI rechazó la clave. Revísala e inténtalo de nuevo." }
+      if (err instanceof OpenAI.PermissionDeniedError) return { ok: false, error: "La clave no tiene permisos para usar la API." }
+      return { ok: false, error: "No se pudo verificar la clave con OpenAI. Inténtalo de nuevo." }
+    }
+
+    await setSecret("openai_api_key", parsed.data)
+    revalidatePath("/admin", "layout")
+    return ok(undefined)
+  } catch (err) {
+    return fail(err, "No se pudo guardar la clave.")
+  }
+}
+
+/** Quita la clave del panel; la app vuelve a usar OPENAI_API_KEY (si existe). */
+export async function removeOpenAIKey(): Promise<ActionResult> {
+  try {
+    await assertAdmin()
+    await deleteSecret("openai_api_key")
+    revalidatePath("/admin", "layout")
+    return ok(undefined)
+  } catch (err) {
+    return fail(err, "No se pudo quitar la clave.")
   }
 }

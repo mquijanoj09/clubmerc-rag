@@ -17,7 +17,12 @@ export default async function AuthLayout({ children }: LayoutProps<"/">) {
       <ThemeToggle className="absolute top-4 right-4" />
       <div className="w-full max-w-sm animate-in fade-in-0 slide-in-from-bottom-2 duration-500">
         <div className="mb-8 flex flex-col items-center text-center">
-          <AssistantAvatar size="lg" />
+          {info.logo_url ? (
+            // eslint-disable-next-line @next/next/no-img-element -- el logo viene de Supabase Storage y puede cambiar
+            <img src={info.logo_url} alt="" className="h-14 w-auto max-w-[240px] object-contain" />
+          ) : (
+            <AssistantAvatar size="lg" />
+          )}
           <h1 className="mt-4 text-2xl font-semibold tracking-tight">{info.name}</h1>
           <p className="mt-1.5 text-sm text-balance text-muted-foreground">{info.description}</p>
         </div>

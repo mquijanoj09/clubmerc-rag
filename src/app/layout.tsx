@@ -1,32 +1,73 @@
 import type { Metadata, Viewport } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
+import { connection } from "next/server"
+import { BrandProvider } from "@/components/brand-provider"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { getPublicAssistantInfo } from "@/lib/assistant/settings"
+import { DEFAULT_BRAND, readableOn } from "@/lib/color"
 import "./globals.css"
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] })
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] })
 
-export const metadata: Metadata = {
-  title: "Asistente IA",
-  description: "Asistente de inteligencia artificial especializado que responde con base en documentación verificada.",
+/** La marca vive en la base de datos: si no está disponible, la app usa los valores por defecto. */
+async function loadBrand() {
+  await connection()
+  try {
+    return await getPublicAssistantInfo()
+  } catch {
+    return null
+  }
 }
 
-export const viewport: Viewport = {
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
-  ],
+export async function generateMetadata(): Promise<Metadata> {
+  const info = await loadBrand()
+  const name = info?.name ?? "Asistente IA"
+  return {
+    title: { default: name, template: `%s · ${name}` },
+    description: info?.description,
+    // Solo el ícono cuadrado sirve como favicon: un logo horizontal se vuelve ilegible a 16 px.
+    icons: { icon: info?.icon_url ?? "/brand-icon.svg" },
+  }
 }
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export async function generateViewport(): Promise<Viewport> {
+  const info = await loadBrand()
+  return {
+    themeColor: [
+      { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+      { media: "(prefers-color-scheme: dark)", color: info?.brand_color ?? DEFAULT_BRAND.color },
+    ],
+  }
+}
+
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  const info = await loadBrand()
+  const color = info?.brand_color ?? DEFAULT_BRAND.color
+  const accent = info?.brand_accent ?? DEFAULT_BRAND.accent
+  // Los colores salen del panel de administración (validados como #rrggbb).
+  const brandVars = {
+    "--brand": color,
+    "--brand-accent": accent,
+    "--brand-foreground": readableOn(color),
+    "--brand-accent-foreground": readableOn(accent),
+  } as React.CSSProperties
+
   return (
-    <html lang="es" suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
+    <html
+      lang="es"
+      suppressHydrationWarning
+      style={brandVars}
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+    >
       <body className="h-full">
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-          <TooltipProvider delay={300}>{children}</TooltipProvider>
-          <Toaster position="top-center" />
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
+          <BrandProvider logoUrl={info?.logo_url ?? null} iconUrl={info?.icon_url ?? null}>
+            <TooltipProvider delay={300}>{children}</TooltipProvider>
+            <Toaster position="top-center" />
+          </BrandProvider>
         </ThemeProvider>
       </body>
     </html>

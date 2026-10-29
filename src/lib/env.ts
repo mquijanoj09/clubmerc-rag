@@ -11,4 +11,6 @@ export const supabaseAnonKey = () =>
   required("NEXT_PUBLIC_SUPABASE_ANON_KEY", process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
 export const supabaseServiceKey = () =>
   required("SUPABASE_SERVICE_ROLE_KEY", process.env.SUPABASE_SERVICE_ROLE_KEY)
-export const openaiApiKey = () => required("OPENAI_API_KEY", process.env.OPENAI_API_KEY)
+// Opcional si la clave se configura en el panel (/admin/brand).
+export const openaiApiKey = () =>
+  required("OPENAI_API_KEY (o configúrala en el panel de administración)", process.env.OPENAI_API_KEY)

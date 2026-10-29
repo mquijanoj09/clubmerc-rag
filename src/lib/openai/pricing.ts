@@ -4,8 +4,7 @@
  */
 export const CHAT_MODELS = {
   "gpt-4.1-mini": { label: "GPT-4.1 mini", input: 0.4, output: 1.6 },
-  "gpt-4.1-nano": { label: "GPT-4.1 nano (más económico)", input: 0.1, output: 0.4 },
-  "gpt-4o-mini": { label: "GPT-4o mini", input: 0.15, output: 0.6 },
+  "gpt-4o-mini": { label: "GPT-4o mini (más económico)", input: 0.15, output: 0.6 },
   "gpt-4.1": { label: "GPT-4.1 (más preciso, más costoso)", input: 2, output: 8 },
 } as const
 

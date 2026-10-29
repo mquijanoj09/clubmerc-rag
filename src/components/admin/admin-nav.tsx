@@ -11,6 +11,7 @@ const LINKS = [
   { href: "/admin/users", label: "Usuarios" },
   { href: "/admin/requests", label: "Solicitudes de preguntas" },
   { href: "/admin/limits", label: "Límites y costos" },
+  { href: "/admin/brand", label: "Marca y acceso" },
 ] as const
 
 export function AdminNav({ pendingRequests }: { pendingRequests: number }) {

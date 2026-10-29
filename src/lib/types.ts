@@ -26,13 +26,27 @@ export interface AssistantSettings {
   max_chunks: number
   global_monthly_limit: number
   monthly_budget_usd: number
+  brand_color: string
+  brand_accent: string
+  logo_url: string | null
+  icon_url: string | null
+  allowed_email_domains: string[]
   updated_at: string
 }
 
 /** Información del asistente que puede verse en el chat (sin instrucciones internas). */
 export type PublicAssistantInfo = Pick<
   AssistantSettings,
-  "name" | "description" | "topic" | "welcome_message" | "suggested_questions"
+  | "name"
+  | "description"
+  | "topic"
+  | "welcome_message"
+  | "suggested_questions"
+  | "brand_color"
+  | "brand_accent"
+  | "logo_url"
+  | "icon_url"
+  | "allowed_email_domains"
 >
 
 export interface Profile {

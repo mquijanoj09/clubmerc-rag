@@ -57,7 +57,7 @@ async function classify(
     .map((m) => `${m.role === "user" ? "Usuario" : "Asistente"}: ${m.content.slice(0, 500)}`)
     .join("\n")
 
-  const res = await getOpenAI().chat.completions.create({
+  const res = await (await getOpenAI()).chat.completions.create({
     model: s.chat_model,
     temperature: 0,
     max_completion_tokens: CLASSIFIER_MAX_TOKENS,
@@ -297,7 +297,7 @@ export async function runChat(params: {
       { role: "user", content: question },
     ]
 
-    const stream = await getOpenAI().chat.completions.create({
+    const stream = await (await getOpenAI()).chat.completions.create({
       model: s.chat_model,
       temperature: 0.2,
       max_completion_tokens: s.max_output_tokens,

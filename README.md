@@ -64,6 +64,9 @@ En `/admin`:
 1. **Configuración de la IA:** nombre, tema, mensaje de bienvenida, preguntas sugeridas, tono, longitud, restricciones e instrucciones.
 2. **Documentos:** sube PDF, DOCX, TXT o Markdown. Cada archivo pasa por *Subiendo → Procesando → Disponible* (o *Error* con el motivo).
 3. **Límites y costos:** preguntas gratuitas, tokens, fragmentos, límite global y presupuesto.
+4. **Marca y acceso:** logo, colores, dominios de correo autorizados a registrarse y clave de OpenAI (cifrada). Con esto, reutilizar el proyecto solo requiere una base de datos nueva y las claves de Supabase en el entorno.
+
+> Si ya tenías la base creada, ejecuta también [`20261029000000_brand_and_access.sql`](supabase/migrations/20261029000000_brand_and_access.sql).
 
 ---
 

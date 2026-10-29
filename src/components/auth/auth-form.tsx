@@ -7,6 +7,7 @@ import { Loader2, MailCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { isEmailAllowed } from "@/lib/assistant/email-domains"
 import { createClient } from "@/lib/supabase/client"
 
 const ERRORS: Record<string, string> = {
@@ -15,13 +16,26 @@ const ERRORS: Record<string, string> = {
   "User already registered": "Ya existe una cuenta con este correo.",
 }
 
-function translate(message: string) {
+const domainMessage = (domains: string[]) =>
+  `Solo pueden registrarse correos de: ${domains.map((d) => `@${d}`).join(", ")}.`
+
+function translate(message: string, domains: string[]) {
+  // El disparador de la base de datos rechaza dominios no autorizados.
+  if (message.includes("Database error saving new user") && domains.length) return domainMessage(domains)
   if (message.toLowerCase().includes("rate limit")) return "Demasiados intentos. Espera unos minutos."
   if (message.toLowerCase().includes("password")) return "La contraseña debe tener al menos 6 caracteres."
   return ERRORS[message] ?? "No se pudo completar la operación. Inténtalo de nuevo."
 }
 
-export function AuthForm({ mode, initialError }: { mode: "login" | "register"; initialError?: string }) {
+export function AuthForm({
+  mode,
+  initialError,
+  allowedDomains = [],
+}: {
+  mode: "login" | "register"
+  initialError?: string
+  allowedDomains?: string[]
+}) {
   const router = useRouter()
   const [error, setError] = useState(initialError ?? "")
   const [loading, setLoading] = useState(false)
@@ -42,11 +56,16 @@ export function AuthForm({ mode, initialError }: { mode: "login" | "register"; i
     if (isLogin) {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) {
-        setError(translate(error.message))
+        setError(translate(error.message, allowedDomains))
         setLoading(false)
         return
       }
     } else {
+      if (!isEmailAllowed(email, allowedDomains)) {
+        setError(domainMessage(allowedDomains))
+        setLoading(false)
+        return
+      }
       if (password.length < 8) {
         setError("La contraseña debe tener al menos 8 caracteres.")
         setLoading(false)
@@ -61,7 +80,7 @@ export function AuthForm({ mode, initialError }: { mode: "login" | "register"; i
         },
       })
       if (error) {
-        setError(translate(error.message))
+        setError(translate(error.message, allowedDomains))
         setLoading(false)
         return
       }
@@ -109,7 +128,10 @@ export function AuthForm({ mode, initialError }: { mode: "login" | "register"; i
         )}
         <div className="space-y-2">
           <Label htmlFor="email">Correo electrónico</Label>
-          <Input id="email" name="email" type="email" required autoComplete="email" placeholder="tu@correo.com" className="h-10" />
+          <Input id="email" name="email" type="email" required autoComplete="email" placeholder={!isLogin && allowedDomains[0] ? `tu@${allowedDomains[0]}` : "tu@correo.com"} className="h-10" />
+          {!isLogin && allowedDomains.length > 0 && (
+            <p className="text-xs text-muted-foreground">{domainMessage(allowedDomains)}</p>
+          )}
         </div>
         <div className="space-y-2">
           <Label htmlFor="password">Contraseña</Label>

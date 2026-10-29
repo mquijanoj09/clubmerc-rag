@@ -1,18 +1,29 @@
 import "server-only"
 import OpenAI from "openai"
 import { openaiApiKey } from "@/lib/env"
+import { getSecret } from "@/lib/secrets"
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from "@/lib/openai/pricing"
 
-let client: OpenAI | null = null
+let client: { apiKey: string; instance: OpenAI } | null = null
 
-export function getOpenAI(): OpenAI {
-  if (!client) client = new OpenAI({ apiKey: openaiApiKey(), maxRetries: 2, timeout: 45_000 })
-  return client
+/** Clave configurada en el panel; si no hay ninguna, la variable de entorno OPENAI_API_KEY. */
+export async function resolveOpenAIKey(): Promise<{ key: string; source: "panel" | "env" }> {
+  const stored = await getSecret("openai_api_key")
+  if (stored) return { key: stored, source: "panel" }
+  return { key: openaiApiKey(), source: "env" }
+}
+
+export async function getOpenAI(): Promise<OpenAI> {
+  const { key } = await resolveOpenAIKey()
+  if (!client || client.apiKey !== key) {
+    client = { apiKey: key, instance: new OpenAI({ apiKey: key, maxRetries: 2, timeout: 45_000 }) }
+  }
+  return client.instance
 }
 
 /** Genera embeddings en lotes. Devuelve los vectores en el mismo orden y los tokens usados. */
 export async function embed(inputs: string[]): Promise<{ vectors: number[][]; tokens: number }> {
-  const openai = getOpenAI()
+  const openai = await getOpenAI()
   const vectors: number[][] = []
   let tokens = 0
   const BATCH = 96

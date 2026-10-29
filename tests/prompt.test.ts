@@ -31,6 +31,11 @@ const settings: AssistantSettings = {
   max_chunks: 5,
   global_monthly_limit: 1000,
   monthly_budget_usd: 5,
+  brand_color: "#1e293b",
+  brand_accent: "#64748b",
+  logo_url: null,
+  icon_url: null,
+  allowed_email_domains: [],
   updated_at: "",
 }
 
