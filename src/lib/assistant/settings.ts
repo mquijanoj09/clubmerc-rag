@@ -16,6 +16,10 @@ export const getSettings = cache(async (): Promise<AssistantSettings> => {
     brand_accent: data.brand_accent ?? DEFAULT_BRAND.accent,
     logo_url: data.logo_url ?? null,
     icon_url: data.icon_url ?? null,
+    icon_dark_url: data.icon_dark_url ?? null,
+    logo_dark_url: data.logo_dark_url ?? null,
+    auth_image_url: data.auth_image_url ?? null,
+    auth_message: data.auth_message ?? "",
     allowed_email_domains: data.allowed_email_domains ?? [],
   } as AssistantSettings
 })
@@ -24,7 +28,6 @@ export async function getPublicAssistantInfo(): Promise<PublicAssistantInfo> {
   const s = await getSettings()
   return {
     name: s.name,
-    description: s.description,
     topic: s.topic,
     welcome_message: s.welcome_message,
     suggested_questions: s.suggested_questions,
@@ -32,6 +35,10 @@ export async function getPublicAssistantInfo(): Promise<PublicAssistantInfo> {
     brand_accent: s.brand_accent,
     logo_url: s.logo_url,
     icon_url: s.icon_url,
+    icon_dark_url: s.icon_dark_url,
+    logo_dark_url: s.logo_dark_url,
+    auth_image_url: s.auth_image_url,
+    auth_message: s.auth_message,
     allowed_email_domains: s.allowed_email_domains,
   }
 }

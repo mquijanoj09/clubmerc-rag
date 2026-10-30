@@ -21,10 +21,10 @@ export const getCurrentUser = cache(async (): Promise<Profile | null> => {
   return (profile as Profile | null) ?? null
 })
 
-/** Para páginas: redirige al login si no hay sesión. */
+/** Para páginas: sin sesión válida, limpia las cookies y lleva al login (ver /auth/reset). */
 export async function requireUser(): Promise<Profile> {
   const user = await getCurrentUser()
-  if (!user) redirect("/login")
+  if (!user) redirect("/auth/reset")
   return user
 }
 

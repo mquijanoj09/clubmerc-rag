@@ -30,15 +30,18 @@ export interface AssistantSettings {
   brand_accent: string
   logo_url: string | null
   icon_url: string | null
+  icon_dark_url: string | null
+  logo_dark_url: string | null
+  auth_image_url: string | null
+  auth_message: string
   allowed_email_domains: string[]
   updated_at: string
 }
 
-/** Información del asistente que puede verse en el chat (sin instrucciones internas). */
+/** Información del asistente que puede verse en el chat (sin instrucciones internas ni la descripción, que solo usa la IA). */
 export type PublicAssistantInfo = Pick<
   AssistantSettings,
   | "name"
-  | "description"
   | "topic"
   | "welcome_message"
   | "suggested_questions"
@@ -46,6 +49,10 @@ export type PublicAssistantInfo = Pick<
   | "brand_accent"
   | "logo_url"
   | "icon_url"
+  | "icon_dark_url"
+  | "logo_dark_url"
+  | "auth_image_url"
+  | "auth_message"
   | "allowed_email_domains"
 >
 

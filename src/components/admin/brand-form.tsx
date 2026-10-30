@@ -4,13 +4,22 @@ import { useRef, useState, useTransition } from "react"
 import { ImagePlus, Loader2, Trash2 } from "lucide-react"
 import { useTheme } from "next-themes"
 import { toast } from "sonner"
-import { removeBrandImage, updateBrand, uploadBrandImage, type BrandImage } from "@/actions/admin"
+import {
+  commitBrandImage,
+  createBrandUpload,
+  removeBrandImage,
+  updateAuthMessage,
+  updateBrand,
+  type BrandImage,
+} from "@/actions/admin"
 import { Field } from "@/components/admin/field"
 import { Section } from "@/components/admin/page-header"
 import { SaveBar } from "@/components/admin/save-bar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { HEX_COLOR, contrast, readableOn } from "@/lib/color"
+import { createClient } from "@/lib/supabase/client"
 import type { AssistantSettings } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -115,16 +124,61 @@ async function normalizeIcon(file: File): Promise<File> {
   }
 }
 
-const IMAGE_COPY: Record<BrandImage, { title: string; hint: string; previewClass: string }> = {
+/** Reduce fotografías grandes (máx. 2400 px de ancho, WebP) para que la pantalla de inicio cargue rápido. */
+async function shrinkPhoto(file: File): Promise<File> {
+  if (file.type === "image/svg+xml") return file
+  try {
+    const img = await loadImage(file)
+    const MAX_W = 2400
+    if (img.naturalWidth <= MAX_W && file.size <= 1.5 * 1024 * 1024) return file
+    const scale = Math.min(1, MAX_W / img.naturalWidth)
+    const canvas = document.createElement("canvas")
+    canvas.width = Math.round(img.naturalWidth * scale)
+    canvas.height = Math.round(img.naturalHeight * scale)
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return file
+    ctx.imageSmoothingQuality = "high"
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", 0.85))
+    return blob && blob.size < file.size ? new File([blob], "auth.webp", { type: "image/webp" }) : file
+  } catch {
+    return file
+  }
+}
+
+const IMAGE_COPY: Record<
+  BrandImage,
+  { title: string; hint: string; previewClass: string; previewBg?: string; prepare?: (f: File) => Promise<File> }
+> = {
   icon: {
-    title: "Ícono",
-    hint: "Solo el símbolo, sin texto. Se recorta y centra automáticamente. Se usa como favicon y como avatar del asistente.",
+    title: "Isotipo (tema claro)",
+    hint: "Solo el símbolo, sin texto y con fondo transparente. Se recorta y centra automáticamente. Se usa como favicon, avatar del asistente y en el fondo de la pantalla de inicio. Máximo 512 KB.",
     previewClass: "size-16",
+    prepare: normalizeIcon,
+  },
+  icon_dark: {
+    title: "Isotipo (tema oscuro)",
+    hint: "Versión para fondos oscuros. Si no lo subes, se usa el isotipo claro. Máximo 512 KB.",
+    previewClass: "size-16",
+    previewBg: "bg-slate-900",
+    prepare: normalizeIcon,
   },
   logo: {
-    title: "Logo",
-    hint: "Horizontal, con el nombre de la marca. Se muestra en el inicio de sesión y el registro.",
+    title: "Logo (tema claro)",
+    hint: "Horizontal, con el nombre de la marca, para fondos claros. Se muestra en la pantalla de inicio de sesión. Máximo 512 KB.",
     previewClass: "h-16 w-44",
+  },
+  logo_dark: {
+    title: "Logo (tema oscuro)",
+    hint: "Versión para fondos oscuros (normalmente en blanco). Se usa en el tema oscuro y sobre la imagen de inicio. Si no lo subes, el logo claro se muestra sobre un recuadro blanco. Máximo 512 KB.",
+    previewClass: "h-16 w-44",
+    previewBg: "bg-slate-900",
+  },
+  auth_image: {
+    title: "Imagen de inicio de sesión",
+    hint: "Ocupa la mitad izquierda de la pantalla de inicio en computador. Horizontal o vertical, idealmente de al menos 1600 px. Si no la subes, se muestra un fondo con los colores y el ícono de la marca. Máximo 5 MB.",
+    previewClass: "h-24 w-40",
+    prepare: shrinkPhoto,
   },
 }
 
@@ -134,18 +188,24 @@ function BrandImageField({ kind, initialUrl }: { kind: BrandImage; initialUrl: s
   const fileRef = useRef<HTMLInputElement>(null)
   const copy = IMAGE_COPY[kind]
 
-  async function onFile(event: React.ChangeEvent<HTMLInputElement>) {
+  function onFile(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     event.target.value = ""
     if (!file) return
-    const upload = kind === "icon" ? await normalizeIcon(file) : file
-    const body = new FormData()
-    body.set("file", upload)
     startTransition(async () => {
-      const result = await uploadBrandImage(kind, body)
+      const upload = copy.prepare ? await copy.prepare(file) : file
+      const prepared = await createBrandUpload(kind, { type: upload.type, size: upload.size })
+      if (!prepared.ok) return void toast.error(prepared.error)
+
+      const { error } = await createClient()
+        .storage.from("branding")
+        .uploadToSignedUrl(prepared.data.path, prepared.data.token, upload, { contentType: upload.type })
+      if (error) return void toast.error("No se pudo subir la imagen.")
+
+      const result = await commitBrandImage(kind, prepared.data.path)
       if (!result.ok) return void toast.error(result.error)
       setUrl(result.data.url)
-      toast.success(`${copy.title} actualizado`)
+      toast.success(`${copy.title}: actualizado`)
     })
   }
 
@@ -154,17 +214,31 @@ function BrandImageField({ kind, initialUrl }: { kind: BrandImage; initialUrl: s
       const result = await removeBrandImage(kind)
       if (!result.ok) return void toast.error(result.error)
       setUrl(null)
-      toast.success(`${copy.title} eliminado`)
+      toast.success(`${copy.title}: eliminado`)
     })
   }
 
   return (
-    <Field label={copy.title} hint={`${copy.hint} PNG, JPG, WebP o SVG, máximo 512 KB.`}>
+    <Field label={copy.title} hint={`${copy.hint} PNG, JPG, WebP o SVG.`}>
       <div className="flex flex-wrap items-center gap-4">
-        <div className={cn("flex shrink-0 items-center justify-center overflow-hidden rounded-2xl border bg-white", copy.previewClass)}>
+        <div
+          className={cn(
+            "flex shrink-0 items-center justify-center overflow-hidden rounded-2xl border",
+            copy.previewBg ?? "bg-white",
+            copy.previewClass
+          )}
+        >
           {url ? (
             // eslint-disable-next-line @next/next/no-img-element -- vista previa de la imagen subida
-            <img src={url} alt={`${copy.title} actual`} className={cn("size-full object-contain", kind === "logo" && "p-1.5")} />
+            <img
+              src={url}
+              alt={`${copy.title} actual`}
+              className={cn(
+                "size-full",
+                kind === "auth_image" ? "object-cover" : "object-contain",
+                kind === "auth_image" ? "" : kind.startsWith("logo") ? "p-2" : "p-1.5"
+              )}
+            />
           ) : (
             <ImagePlus className="size-6 text-slate-400" />
           )}
@@ -182,6 +256,44 @@ function BrandImageField({ kind, initialUrl }: { kind: BrandImage; initialUrl: s
           )}
         </div>
       </div>
+    </Field>
+  )
+}
+
+function AuthMessageField({ initial }: { initial: string }) {
+  const [saved, setSaved] = useState(initial)
+  const [value, setValue] = useState(initial)
+  const [pending, startTransition] = useTransition()
+  const dirty = value.trim() !== saved
+
+  function onSave() {
+    startTransition(async () => {
+      const result = await updateAuthMessage(value)
+      if (!result.ok) return void toast.error(result.error)
+      setSaved(value.trim())
+      setValue(value.trim())
+      toast.success(value.trim() ? "Mensaje de inicio guardado" : "Mensaje de inicio eliminado")
+    })
+  }
+
+  return (
+    <Field
+      label="Mensaje de inicio"
+      htmlFor="auth_message"
+      hint={`Se muestra junto al nombre en la pantalla de inicio de sesión y registro. Déjalo vacío para no mostrar ninguno. ${value.length}/300`}
+    >
+      <Textarea
+        id="auth_message"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        maxLength={300}
+        rows={2}
+        placeholder="Ej.: Resuelve tus dudas al instante con la información oficial."
+      />
+      <Button type="button" variant="outline" size="sm" disabled={pending || !dirty} onClick={onSave}>
+        {pending && <Loader2 className="animate-spin" />}
+        Guardar mensaje
+      </Button>
     </Field>
   )
 }
@@ -214,9 +326,20 @@ export function BrandForm({ settings }: { settings: AssistantSettings }) {
 
   return (
     <div className="space-y-4">
-      <Section title="Logo e ícono" description="Si no subes un ícono, se usa uno genérico con los colores de la marca.">
-        <BrandImageField kind="icon" initialUrl={settings.icon_url} />
-        <BrandImageField kind="logo" initialUrl={settings.logo_url} />
+      <Section title="Isotipo y logo" description="Si no subes un isotipo, se usa uno genérico con los colores de la marca.">
+        <div className="grid gap-5 sm:grid-cols-2">
+          <BrandImageField kind="icon" initialUrl={settings.icon_url} />
+          <BrandImageField kind="icon_dark" initialUrl={settings.icon_dark_url} />
+        </div>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <BrandImageField kind="logo" initialUrl={settings.logo_url} />
+          <BrandImageField kind="logo_dark" initialUrl={settings.logo_dark_url} />
+        </div>
+      </Section>
+
+      <Section title="Pantalla de inicio de sesión" description="Lo primero que ven los usuarios antes de entrar.">
+        <AuthMessageField initial={settings.auth_message} />
+        <BrandImageField kind="auth_image" initialUrl={settings.auth_image_url} />
       </Section>
 
       <form onSubmit={onSubmit} className="space-y-4">

@@ -79,7 +79,7 @@ export function AssistantForm({ settings }: { settings: AssistantSettings }) {
             <Input {...text("topic")} maxLength={200} required className="h-10" />
           </Field>
         </div>
-        <Field label="Descripción" htmlFor="description">
+        <Field label="Descripción" htmlFor="description" hint="Solo la usa la IA para entender su rol. No se muestra a los usuarios.">
           <Textarea {...text("description")} maxLength={500} rows={2} />
         </Field>
         <Field label="Mensaje de bienvenida" htmlFor="welcome_message" hint="Se muestra al iniciar una conversación y como respuesta a los saludos.">

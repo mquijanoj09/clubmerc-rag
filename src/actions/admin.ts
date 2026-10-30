@@ -48,13 +48,12 @@ const brandSchema = z.object({
   brand_accent: z.string().regex(HEX_COLOR, "El color de acento debe tener el formato #rrggbb."),
 })
 
-const LOGO_TYPES: Record<string, string> = {
+const BRAND_IMAGE_TYPES: Record<string, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",
   "image/webp": "webp",
   "image/svg+xml": "svg",
 }
-const MAX_LOGO_BYTES = 512 * 1024
 
 async function saveSettings(values: Record<string, unknown>) {
   const { error } = await createAdminClient()
@@ -215,8 +214,15 @@ export async function updateBrand(input: z.input<typeof brandSchema>): Promise<A
   }
 }
 
-const BRAND_IMAGES = { logo: "logo_url", icon: "icon_url" } as const
+const BRAND_IMAGES = {
+  icon: { column: "icon_url", maxBytes: 512 * 1024 },
+  icon_dark: { column: "icon_dark_url", maxBytes: 512 * 1024 },
+  logo: { column: "logo_url", maxBytes: 512 * 1024 },
+  logo_dark: { column: "logo_dark_url", maxBytes: 512 * 1024 },
+  auth_image: { column: "auth_image_url", maxBytes: 5 * 1024 * 1024 },
+} as const
 export type BrandImage = keyof typeof BRAND_IMAGES
+const brandImageKind = z.enum(["icon", "icon_dark", "logo", "logo_dark", "auth_image"])
 
 /** Elimina del bucket el archivo al que apunta una URL pública (si es del bucket de marca). */
 async function removeBrandFile(url: string | null) {
@@ -226,42 +232,63 @@ async function removeBrandFile(url: string | null) {
   await createAdminClient().storage.from("branding").remove([decodeURIComponent(url.slice(i + marker.length).split("?")[0])])
 }
 
-async function currentBrandUrl(column: (typeof BRAND_IMAGES)[BrandImage]): Promise<string | null> {
+async function currentBrandUrl(column: string): Promise<string | null> {
   const { data } = await createAdminClient().from("assistant_settings").select(column).eq("id", 1).single()
   return ((data as Record<string, string | null> | null)?.[column] as string | null) ?? null
 }
 
-export async function uploadBrandImage(kind: BrandImage, formData: FormData): Promise<ActionResult<{ url: string }>> {
+/**
+ * Prepara la subida de una imagen de marca. El navegador la sube directamente a
+ * Storage con la URL firmada (las fotografías superan el límite de las Server Actions).
+ */
+export async function createBrandUpload(
+  kind: BrandImage,
+  input: { type: string; size: number }
+): Promise<ActionResult<{ path: string; token: string }>> {
   try {
     await assertAdmin()
-    const column = BRAND_IMAGES[z.enum(["logo", "icon"]).parse(kind)]
-    const file = formData.get("file")
-    if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Selecciona una imagen." }
-    const ext = LOGO_TYPES[file.type]
+    const { maxBytes } = BRAND_IMAGES[brandImageKind.parse(kind)]
+    const ext = BRAND_IMAGE_TYPES[input.type]
     if (!ext) return { ok: false, error: "Formato no soportado. Usa PNG, JPG, WebP o SVG." }
-    if (file.size > MAX_LOGO_BYTES) return { ok: false, error: "La imagen supera el máximo de 512 KB." }
-
-    const db = createAdminClient()
-    const previous = await currentBrandUrl(column)
+    if (!Number.isFinite(input.size) || input.size <= 0) return { ok: false, error: "La imagen está vacía." }
+    if (input.size > maxBytes) return { ok: false, error: `La imagen supera el máximo de ${maxBytes / 1024 / 1024 >= 1 ? `${maxBytes / 1024 / 1024} MB` : `${maxBytes / 1024} KB`}.` }
 
     // Nombre nuevo en cada subida: evita que el navegador muestre la imagen anterior en caché.
-    const path = `${kind}-${Date.now()}.${ext}`
-    const { error } = await db.storage.from("branding").upload(path, file, { contentType: file.type })
-    if (error) throw error
-    const url = db.storage.from("branding").getPublicUrl(path).data.publicUrl
+    const path = `${kind}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${ext}`
+    const { data, error } = await createAdminClient().storage.from("branding").createSignedUploadUrl(path)
+    if (error || !data) throw error ?? new Error("Sin URL de subida")
+    return ok({ path, token: data.token })
+  } catch (err) {
+    return fail(err, "No se pudo preparar la subida de la imagen.")
+  }
+}
 
+/** Activa una imagen ya subida y borra la anterior. */
+export async function commitBrandImage(kind: BrandImage, path: string): Promise<ActionResult<{ url: string }>> {
+  try {
+    await assertAdmin()
+    const { column } = BRAND_IMAGES[brandImageKind.parse(kind)]
+    if (!new RegExp(`^${kind}-\\d+-[0-9a-f]{8}\\.(png|jpg|webp|svg)$`).test(path)) {
+      return { ok: false, error: "Ruta de imagen no válida." }
+    }
+    const db = createAdminClient()
+    const { data: exists } = await db.storage.from("branding").exists(path)
+    if (!exists) return { ok: false, error: "La imagen no se subió correctamente. Inténtalo de nuevo." }
+
+    const previous = await currentBrandUrl(column)
+    const url = db.storage.from("branding").getPublicUrl(path).data.publicUrl
     await saveSettings({ [column]: url })
-    await removeBrandFile(previous)
+    if (previous !== url) await removeBrandFile(previous)
     return ok({ url })
   } catch (err) {
-    return fail(err, "No se pudo subir la imagen.")
+    return fail(err, "No se pudo guardar la imagen.")
   }
 }
 
 export async function removeBrandImage(kind: BrandImage): Promise<ActionResult> {
   try {
     await assertAdmin()
-    const column = BRAND_IMAGES[z.enum(["logo", "icon"]).parse(kind)]
+    const { column } = BRAND_IMAGES[brandImageKind.parse(kind)]
     const previous = await currentBrandUrl(column)
     await saveSettings({ [column]: null })
     await removeBrandFile(previous)
@@ -320,5 +347,18 @@ export async function removeOpenAIKey(): Promise<ActionResult> {
     return ok(undefined)
   } catch (err) {
     return fail(err, "No se pudo quitar la clave.")
+  }
+}
+
+/** Mensaje que se muestra a los usuarios en la pantalla de inicio de sesión. */
+export async function updateAuthMessage(message: string): Promise<ActionResult> {
+  try {
+    await assertAdmin()
+    const parsed = text(300).safeParse(message)
+    if (!parsed.success) return { ok: false, error: "El mensaje admite como máximo 300 caracteres." }
+    await saveSettings({ auth_message: parsed.data })
+    return ok(undefined)
+  } catch (err) {
+    return fail(err, "No se pudo guardar el mensaje.")
   }
 }

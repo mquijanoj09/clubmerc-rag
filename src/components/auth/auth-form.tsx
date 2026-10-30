@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
-import { Loader2, MailCheck } from "lucide-react"
+import { Eye, EyeOff, Loader2, MailCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -40,6 +40,7 @@ export function AuthForm({
   const [error, setError] = useState(initialError ?? "")
   const [loading, setLoading] = useState(false)
   const [confirmEmail, setConfirmEmail] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
   const isLogin = mode === "login"
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -98,7 +99,7 @@ export function AuthForm({
 
   if (confirmEmail) {
     return (
-      <div className="rounded-2xl border bg-card p-6 text-center shadow-sm">
+      <div className="rounded-2xl border bg-card p-6 text-center shadow-sm animate-in fade-in-0 zoom-in-95">
         <MailCheck className="mx-auto size-8 text-muted-foreground" />
         <h2 className="mt-3 font-medium">Revisa tu correo</h2>
         <p className="mt-1.5 text-sm text-muted-foreground">
@@ -113,38 +114,49 @@ export function AuthForm({
   }
 
   return (
-    <div className="rounded-2xl border bg-card p-6 shadow-sm">
-      <h2 className="text-lg font-semibold tracking-tight">{isLogin ? "Inicia sesión" : "Crea tu cuenta"}</h2>
-      <p className="mt-1 text-sm text-muted-foreground">
-        {isLogin ? "Ingresa con tu correo y contraseña." : "Regístrate para empezar a hacer preguntas."}
+    // En escritorio el formulario va sin tarjeta: el panel de marca ya enmarca la pantalla.
+    <div className="rounded-2xl border bg-card p-6 shadow-sm sm:p-8 lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
+      <h1 className="text-2xl font-semibold tracking-tight">{isLogin ? "Bienvenido de nuevo" : "Crea tu cuenta"}</h1>
+      <p className="mt-1.5 text-sm text-muted-foreground">
+        {isLogin ? "Ingresa con tu correo y contraseña para continuar." : "Regístrate para empezar a hacer preguntas."}
       </p>
 
-      <form onSubmit={onSubmit} className="mt-6 space-y-4">
+      <form onSubmit={onSubmit} className="mt-8 space-y-5">
         {!isLogin && (
           <div className="space-y-2">
             <Label htmlFor="fullName">Nombre</Label>
-            <Input id="fullName" name="fullName" autoComplete="name" placeholder="Tu nombre" maxLength={100} className="h-10" />
+            <Input id="fullName" name="fullName" autoComplete="name" placeholder="Tu nombre" maxLength={100} className="h-11" />
           </div>
         )}
         <div className="space-y-2">
           <Label htmlFor="email">Correo electrónico</Label>
-          <Input id="email" name="email" type="email" required autoComplete="email" placeholder={!isLogin && allowedDomains[0] ? `tu@${allowedDomains[0]}` : "tu@correo.com"} className="h-10" />
+          <Input id="email" name="email" type="email" required autoComplete="email" placeholder={!isLogin && allowedDomains[0] ? `tu@${allowedDomains[0]}` : "tu@correo.com"} className="h-11" />
           {!isLogin && allowedDomains.length > 0 && (
             <p className="text-xs text-muted-foreground">{domainMessage(allowedDomains)}</p>
           )}
         </div>
         <div className="space-y-2">
           <Label htmlFor="password">Contraseña</Label>
-          <Input
-            id="password"
-            name="password"
-            type="password"
-            required
-            minLength={isLogin ? 6 : 8}
-            autoComplete={isLogin ? "current-password" : "new-password"}
-            placeholder={isLogin ? "••••••••" : "Mínimo 8 caracteres"}
-            className="h-10"
-          />
+          <div className="relative">
+            <Input
+              id="password"
+              name="password"
+              type={showPassword ? "text" : "password"}
+              required
+              minLength={isLogin ? 6 : 8}
+              autoComplete={isLogin ? "current-password" : "new-password"}
+              placeholder={isLogin ? "••••••••" : "Mínimo 8 caracteres"}
+              className="h-11 pr-11"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+              className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:text-foreground"
+            >
+              {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -153,13 +165,13 @@ export function AuthForm({
           </p>
         )}
 
-        <Button type="submit" className="h-10 w-full" disabled={loading}>
+        <Button type="submit" className="h-11 w-full text-[0.95rem]" disabled={loading}>
           {loading && <Loader2 className="animate-spin" />}
           {isLogin ? "Iniciar sesión" : "Crear cuenta"}
         </Button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-muted-foreground">
+      <p className="mt-8 text-center text-sm text-muted-foreground lg:text-left">
         {isLogin ? "¿No tienes cuenta? " : "¿Ya tienes cuenta? "}
         <Link href={isLogin ? "/register" : "/login"} className="font-medium text-foreground underline-offset-4 hover:underline">
           {isLogin ? "Regístrate" : "Inicia sesión"}

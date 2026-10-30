@@ -35,6 +35,10 @@ const settings: AssistantSettings = {
   brand_accent: "#64748b",
   logo_url: null,
   icon_url: null,
+  icon_dark_url: null,
+  logo_dark_url: null,
+  auth_image_url: null,
+  auth_message: "",
   allowed_email_domains: [],
   updated_at: "",
 }

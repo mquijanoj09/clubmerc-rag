@@ -27,9 +27,16 @@ export async function generateMetadata(): Promise<Metadata> {
   const name = info?.name ?? "Asistente IA"
   return {
     title: { default: name, template: `%s · ${name}` },
-    description: info?.description,
     // Solo el ícono cuadrado sirve como favicon: un logo horizontal se vuelve ilegible a 16 px.
-    icons: { icon: info?.icon_url ?? "/brand-icon.svg" },
+    icons: {
+      icon: info?.icon_url
+        ? [
+            { url: info.icon_url, media: "(prefers-color-scheme: light)" },
+            // El favicon sigue el tema del navegador, no el de la app.
+            { url: info.icon_dark_url ?? info.icon_url, media: "(prefers-color-scheme: dark)" },
+          ]
+        : "/brand-icon.svg",
+    },
   }
 }
 
@@ -64,7 +71,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="h-full">
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
-          <BrandProvider logoUrl={info?.logo_url ?? null} iconUrl={info?.icon_url ?? null}>
+          <BrandProvider logoUrl={info?.logo_url ?? null} iconUrl={info?.icon_url ?? null} iconDarkUrl={info?.icon_dark_url ?? null}>
             <TooltipProvider delay={300}>{children}</TooltipProvider>
             <Toaster position="top-center" />
           </BrandProvider>
